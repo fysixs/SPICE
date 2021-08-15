@@ -16,3 +16,9 @@
 
 </div>
 <hr size=5 color=#8D84B5 > </hr> 
+
+This Notebook was written to bring together the power of SPICE (through `spiceypy`) and Colab. You have access to **all** space mission data available at NASA/JPL!
+As the Notebook stands you can get basic kinematic data graphically, however that will change with time as I update. However the core mission is to ease the process of data acquisition so you can run whatever analysis you want on it. 
+
+Please send me comments and/or suggestions.
+Thank you!
