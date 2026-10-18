@@ -561,18 +561,13 @@ def analyze_data(
                     data
                 )
 
-                html = data["orbit_fig"].to_html(
-                    full_html=True,
-                    include_plotlyjs=True
-                )
-
-                display(HTML(html))
-
             except Exception as error:
 
                 print(
                     f"Orbit calculation failed: {error}"
                 )
+                
+        data["orbit_fig"].show(renderer="colab")
 
     plot_orbit_button.on_click(
         on_button_clicked
