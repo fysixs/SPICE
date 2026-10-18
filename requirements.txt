@@ -1,0 +1,9 @@
+numpy
+pandas
+spiceypy
+plotly
+bokeh
+ipywidgets
+requests
+beautifulsoup4
+tqdm
