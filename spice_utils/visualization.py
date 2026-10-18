@@ -1,6 +1,14 @@
 """
 Visualization configuration for Plotly and Bokeh.
+
+Includes:
+- Plotly and Bokeh theme configuration
+- Observer sphere
+- Observer and target annotations
+- Multi-target 3D orbit visualization
 """
+
+import numpy as np
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -18,9 +26,16 @@ from .config import (
 )
 
 
+# ============================================================
 # Plot colors
+# ============================================================
+
 plt_clr = px.colors.qualitative.Prism
 
+
+# ============================================================
+# Plotly configuration
+# ============================================================
 
 def configure_plotly():
     """
@@ -33,9 +48,11 @@ def configure_plotly():
         layout={
             "paper_bgcolor": PLOT_BACKGROUND,
             "plot_bgcolor": BACKGROUND,
+
             "font": {
                 "color": TEXT_COLOR,
             },
+
             "colorway": plt_clr,
 
             "hovermode": "closest",
@@ -102,9 +119,12 @@ def configure_plotly():
 
     pio.templates["spice_dark"] = theme
 
-    # Inherit remaining settings from Plotly's dark template
     pio.templates.default = "plotly_dark+spice_dark"
 
+
+# ============================================================
+# Bokeh configuration
+# ============================================================
 
 def configure_bokeh():
     """
@@ -191,12 +211,10 @@ def configure_bokeh():
 
     return theme
 
-# ============================================================
-# Orbit visualization
-# ============================================================
 
-import numpy as np
-
+# ============================================================
+# Observer sphere
+# ============================================================
 
 def sphere(radius, color="grey"):
     """
@@ -206,28 +224,28 @@ def sphere(radius, color="grey"):
     theta = np.linspace(
         0,
         2 * np.pi,
-        100
+        100,
     )
 
     phi = np.linspace(
         0,
         np.pi,
-        100
+        100,
     )
 
     x = radius * np.outer(
         np.cos(theta),
-        np.sin(phi)
+        np.sin(phi),
     )
 
     y = radius * np.outer(
         np.sin(theta),
-        np.sin(phi)
+        np.sin(phi),
     )
 
     z = radius * np.outer(
         np.ones_like(theta),
-        np.cos(phi)
+        np.cos(phi),
     )
 
     return go.Surface(
@@ -240,12 +258,18 @@ def sphere(radius, color="grey"):
         ],
         showscale=False,
         hoverinfo="skip",
+        showlegend=False,
+        name="Observer",
     )
 
 
+# ============================================================
+# Observer annotation
+# ============================================================
+
 def annot_obs(data):
     """
-    Create the observer annotation.
+    Create an annotation identifying the observer.
     """
 
     return {
@@ -263,9 +287,29 @@ def annot_obs(data):
     }
 
 
-def annot_target(data, targetnum=0):
+# ============================================================
+# Target annotations
+# ============================================================
+
+def annot_target(data, targetnum=0, color="teal"):
     """
-    Create initial and final target annotations.
+    Create initial and final annotations for a target.
+
+    Parameters
+    ----------
+    data : dict
+        Shared trajectory data.
+
+    targetnum : int
+        Index of the target.
+
+    color : str
+        Annotation arrow color.
+
+    Returns
+    -------
+    tuple
+        Initial and final annotation dictionaries.
     """
 
     target = data["target"][targetnum]
@@ -279,7 +323,7 @@ def annot_target(data, targetnum=0):
         "ay": -50,
         "arrowhead": 3,
         "yshift": 10,
-        "arrowcolor": "teal",
+        "arrowcolor": color,
         "text": f"{target['name']} Initial",
         "font": {
             "color": "antiquewhite",
@@ -296,7 +340,7 @@ def annot_target(data, targetnum=0):
         "ay": -50,
         "arrowhead": 3,
         "yshift": 10,
-        "arrowcolor": "teal",
+        "arrowcolor": color,
         "text": f"{target['name']} Final",
         "font": {
             "color": "antiquewhite",
@@ -307,94 +351,253 @@ def annot_target(data, targetnum=0):
     return initial, final
 
 
-def plot_orbit(data, targetnum=0):
+# ============================================================
+# Target trajectory traces
+# ============================================================
+
+def add_target_traces(fig, target, color):
     """
-    Plot the selected target's trajectory relative
-    to the observer.
+    Add a target trajectory and its initial/final markers.
+
+    All traces belonging to the target share a legend group.
     """
 
-    target = data["target"][targetnum]
+    x = np.asarray(target["rx"])
+    y = np.asarray(target["ry"])
+    z = np.asarray(target["rz"])
 
-    x = target["rx"]
-    y = target["ry"]
-    z = target["rz"]
+    name = target["name"]
 
-    fig = go.Figure()
+    # --------------------------------------------------------
+    # Trajectory
+    # --------------------------------------------------------
 
-    # Orbit trajectory
     fig.add_trace(
         go.Scatter3d(
             x=x,
             y=y,
             z=z,
             mode="lines",
-            name=target["name"],
+            name=name,
+            legendgroup=name,
+            showlegend=True,
+            line={
+                "color": color,
+                "width": 4,
+            },
         )
     )
 
+    # --------------------------------------------------------
     # Initial position
+    # --------------------------------------------------------
+
     fig.add_trace(
         go.Scatter3d(
             x=[x[0]],
             y=[y[0]],
             z=[z[0]],
             mode="markers",
+            name=f"{name} Initial",
+            legendgroup=name,
+            showlegend=False,
             marker={
-                "color": "green",
+                "color": color,
                 "size": 5,
+                "symbol": "circle",
             },
-            name="Initial",
         )
     )
 
+    # --------------------------------------------------------
     # Final position
+    # --------------------------------------------------------
+
     fig.add_trace(
         go.Scatter3d(
             x=[x[-1]],
             y=[y[-1]],
             z=[z[-1]],
             mode="markers",
+            name=f"{name} Final",
+            legendgroup=name,
+            showlegend=False,
             marker={
-                "color": "red",
-                "size": 5,
+                "color": color,
+                "size": 6,
+                "symbol": "diamond",
             },
-            name="Final",
         )
     )
 
-    # Observer sphere
-    distances = np.sqrt(
-        x**2 + y**2 + z**2
-    )
 
-    radius = 0.05 * np.max(distances)
+# ============================================================
+# Multi-target orbit visualization
+# ============================================================
 
-    if radius > 0:
-        fig.add_trace(
-            sphere(radius, "grey")
+def plot_orbit(data, targetnum=None):
+    """
+    Plot one or more target trajectories relative to the observer.
+
+    Parameters
+    ----------
+    data : dict
+        Shared trajectory data.
+
+    targetnum : int or None, optional
+        If None, plot all available targets.
+        If an integer, plot only the selected target.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Interactive 3D orbit visualization.
+    """
+
+    targets = data.get("target", [])
+
+    if not targets:
+        raise ValueError(
+            "No target trajectories available."
         )
+
+    # --------------------------------------------------------
+    # Select targets
+    # --------------------------------------------------------
+
+    if targetnum is None:
+
+        target_indices = list(
+            range(len(targets))
+        )
+
+    else:
+
+        if not 0 <= targetnum < len(targets):
+            raise IndexError(
+                f"Invalid target index: {targetnum}"
+            )
+
+        target_indices = [targetnum]
+
+    # --------------------------------------------------------
+    # Initialize figure
+    # --------------------------------------------------------
+
+    fig = go.Figure()
 
     annotations = [
-        annot_obs(data),
-        *annot_target(data, targetnum),
+        annot_obs(data)
     ]
 
+    max_distance = 0.0
+
+    # --------------------------------------------------------
+    # Add each target
+    # --------------------------------------------------------
+
+    for index in target_indices:
+
+        target = targets[index]
+
+        color = plt_clr[
+            index % len(plt_clr)
+        ]
+
+        x = np.asarray(target["rx"])
+        y = np.asarray(target["ry"])
+        z = np.asarray(target["rz"])
+
+        if not (
+            len(x) == len(y) == len(z)
+        ) or len(x) == 0:
+            raise ValueError(
+                f"Invalid trajectory for {target['name']}."
+            )
+
+        # Add trajectory and markers
+        add_target_traces(
+            fig,
+            target,
+            color,
+        )
+
+        # Add target annotations
+        annotations.extend(
+            annot_target(
+                data,
+                targetnum=index,
+                color=color,
+            )
+        )
+
+        # Track maximum distance across all targets
+        distances = np.sqrt(
+            x**2 + y**2 + z**2
+        )
+
+        max_distance = max(
+            max_distance,
+            float(np.max(distances)),
+        )
+
+    # --------------------------------------------------------
+    # Observer sphere
+    # --------------------------------------------------------
+
+    radius = 0.05 * max_distance
+
+    if radius > 0:
+
+        fig.add_trace(
+            sphere(
+                radius,
+                color="grey",
+            )
+        )
+
+    # --------------------------------------------------------
+    # Layout
+    # --------------------------------------------------------
+
     fig.update_layout(
-        template="spice_dark",
+        template="plotly_dark+spice_dark",
+
+        title={
+            "text": (
+                "SPICE Trajectories Relative to "
+                f"{data['observer']}"
+            ),
+            "x": 0.05,
+        },
+
         margin={
             "l": 20,
             "r": 20,
             "b": 20,
-            "t": 20,
+            "t": 50,
         },
-        width=600,
-        showlegend=False,
+
+        width=700,
+        height=650,
+
+        showlegend=True,
+
+        legend={
+            "groupclick": "togglegroup",
+        },
+
         scene={
             "annotations": annotations,
             "aspectmode": "data",
+
+            "xaxis_title": "X (km)",
+            "yaxis_title": "Y (km)",
+            "zaxis_title": "Z (km)",
         },
     )
 
+    # Preserve annotation information
     data["orbit_fig_annotations"] = annotations
 
     return fig

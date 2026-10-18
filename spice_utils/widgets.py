@@ -272,26 +272,13 @@ def analyze_data(
     Create widgets for selecting an observer and up to two
     targets, then calculate their SPICE trajectories.
 
-    Parameters
-    ----------
-    data : dict
-        Shared notebook state from import_data().
-
-    naif_codes : pandas.DataFrame
-        NAIF ID/name catalog.
-
-    steps : int
-        Number of trajectory samples.
-
-    Returns
-    -------
-    dict
-        Updated shared notebook state.
+    The resulting trajectories are combined into one figure,
+    but rendering is performed separately in the notebook.
     """
 
-    # --------------------------------------------------------
-    # Identify the currently loaded mission
-    # --------------------------------------------------------
+    # ========================================================
+    # Identify loaded mission
+    # ========================================================
 
     metakernel = data.get("metakernel")
 
@@ -329,7 +316,6 @@ def analyze_data(
             "At least two available objects are required."
         )
 
-    # Lookup table for resolving object names
     name_lookup = dict(
         available_objects[
             ["naif_id", "name"]
@@ -339,9 +325,9 @@ def analyze_data(
         )
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # Object selection widgets
-    # --------------------------------------------------------
+    # ========================================================
 
     targetSelect = widgets.Dropdown(
         options=object_list,
@@ -352,23 +338,18 @@ def analyze_data(
         ),
     )
 
-    observer_options = [
-        item
-        for item in object_list
-        if item[1] != targetSelect.value
-    ]
-
     observerSelect = widgets.Dropdown(
-        options=observer_options,
+        options=object_list,
+        value=object_list[1][1],
         description="Observer:",
         layout=widgets.Layout(
             width="auto",
         ),
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # Optional second target
-    # --------------------------------------------------------
+    # ========================================================
 
     enable_second_target = widgets.Checkbox(
         value=False,
@@ -377,132 +358,20 @@ def analyze_data(
         disabled=len(object_list) < 3,
     )
 
-    target2_options = [
-        item
-        for item in object_list
-        if item[1] not in (
-            targetSelect.value,
-            observerSelect.value,
-        )
-    ]
-
     targetSelect2 = widgets.Dropdown(
-        options=target2_options,
+        options=object_list,
+        value=(
+            object_list[2][1]
+            if len(object_list) >= 3
+            else object_list[0][1]
+        ),
         description="Target 2:",
         disabled=True,
         layout=widgets.Layout(
             width="auto",
+            display="none",
         ),
     )
-
-    # Hide the second target dropdown initially
-    targetSelect2.layout.display = "none"
-
-    # --------------------------------------------------------
-    # Keep selections mutually exclusive
-    # --------------------------------------------------------
-
-    updating = False
-
-    def synchronize_selections(change=None):
-        """
-        Ensure the observer, primary target, and optional
-        second target are distinct.
-        """
-
-        nonlocal updating
-
-        if updating:
-            return
-
-        updating = True
-
-        try:
-
-            selected_target = targetSelect.value
-            selected_observer = observerSelect.value
-            selected_target2 = targetSelect2.value
-
-            # Observer cannot equal primary target
-            observer_options = [
-                item
-                for item in object_list
-                if item[1] != selected_target
-            ]
-
-            observerSelect.options = observer_options
-
-            valid_observers = [
-                item[1]
-                for item in observer_options
-            ]
-
-            if selected_observer in valid_observers:
-                observerSelect.value = selected_observer
-            else:
-                observerSelect.value = valid_observers[0]
-
-            # Primary target cannot equal observer
-            target_options = [
-                item
-                for item in object_list
-                if item[1] != observerSelect.value
-            ]
-
-            targetSelect.options = target_options
-
-            valid_targets = [
-                item[1]
-                for item in target_options
-            ]
-
-            if selected_target in valid_targets:
-                targetSelect.value = selected_target
-            else:
-                targetSelect.value = valid_targets[0]
-
-            # Second target cannot equal either selection
-            target2_options = [
-                item
-                for item in object_list
-                if item[1] not in (
-                    targetSelect.value,
-                    observerSelect.value,
-                )
-            ]
-
-            targetSelect2.options = target2_options
-
-            valid_target2_ids = [
-                item[1]
-                for item in target2_options
-            ]
-
-            if selected_target2 in valid_target2_ids:
-                targetSelect2.value = selected_target2
-            elif valid_target2_ids:
-                targetSelect2.value = valid_target2_ids[0]
-
-        finally:
-            updating = False
-
-    # Observe changes to the primary target and observer
-    targetSelect.observe(
-        synchronize_selections,
-        names="value",
-    )
-
-    observerSelect.observe(
-        synchronize_selections,
-        names="value",
-    )
-
-    # Apply initial filtering
-    synchronize_selections()
-
-    # --------------------------------------------------------
-    # Toggle second target
-    # --------------------------------------------------------
 
     def toggle_second_target(change):
 
@@ -514,17 +383,14 @@ def analyze_data(
             "" if enabled else "none"
         )
 
-        if enabled:
-            synchronize_selections()
-
     enable_second_target.observe(
         toggle_second_target,
         names="value",
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # Date selection
-    # --------------------------------------------------------
+    # ========================================================
 
     dataStartDate = widgets.DatePicker(
         description="Start Date:",
@@ -542,9 +408,9 @@ def analyze_data(
         ),
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # Calculate button
-    # --------------------------------------------------------
+    # ========================================================
 
     calculate_button = widgets.Button(
         description="🚀 Calculate Orbit 🚀",
@@ -558,9 +424,9 @@ def analyze_data(
 
     output = widgets.Output()
 
-    # --------------------------------------------------------
+    # ========================================================
     # Shared state
-    # --------------------------------------------------------
+    # ========================================================
 
     data["steps"] = steps
 
@@ -578,9 +444,9 @@ def analyze_data(
     data["targetSelect2"] = targetSelect2
     data["enableSecondTarget"] = enable_second_target
 
-    # --------------------------------------------------------
-    # Calculate callback
-    # --------------------------------------------------------
+    # ========================================================
+    # Calculation callback
+    # ========================================================
 
     def on_button_clicked(button):
 
@@ -588,61 +454,61 @@ def analyze_data(
 
             output.clear_output(wait=True)
 
-            # --------------------------------------------
-            # Read selections
-            # --------------------------------------------
+            # ------------------------------------------------
+            # Selected objects
+            # ------------------------------------------------
 
             target_id = targetSelect.value
             observer_id = observerSelect.value
 
-            selected_target_ids = [target_id]
+            selected_target_ids = [
+                target_id
+            ]
 
             if enable_second_target.value:
 
-                target2_id = targetSelect2.value
-
-                if target2_id is None:
-                    print(
-                        "No second target is available."
-                    )
-                    return
-
                 selected_target_ids.append(
-                    target2_id
+                    targetSelect2.value
                 )
 
-            # --------------------------------------------
+            # ------------------------------------------------
             # Validate object selections
-            # --------------------------------------------
+            # ------------------------------------------------
 
             selected_ids = (
                 selected_target_ids + [observer_id]
             )
 
             if len(set(selected_ids)) != len(selected_ids):
+
                 print(
-                    "Target and observer selections "
-                    "must all be different."
+                    "Target(s) and observer must "
+                    "all be different objects."
                 )
+
                 return
 
-            # --------------------------------------------
+            # ------------------------------------------------
             # Validate dates
-            # --------------------------------------------
+            # ------------------------------------------------
 
             start_date = dataStartDate.value
             stop_date = dataStopDate.value
 
             if start_date is None or stop_date is None:
+
                 print(
                     "Please select both dates."
                 )
+
                 return
 
             if start_date >= stop_date:
+
                 print(
                     "Start date must be before stop date."
                 )
+
                 return
 
             download_start = data["mainStartDate"].value
@@ -652,15 +518,17 @@ def analyze_data(
                 start_date < download_start
                 or stop_date > download_stop
             ):
+
                 print(
                     "Selected dates must be within "
                     "the downloaded mission range."
                 )
+
                 return
 
-            # --------------------------------------------
-            # Prepare trajectory data
-            # --------------------------------------------
+            # ------------------------------------------------
+            # Prepare target data
+            # ------------------------------------------------
 
             data["target"] = [
                 {
@@ -673,9 +541,12 @@ def analyze_data(
             data["observer"] = name_lookup[observer_id]
             data["observer_id"] = int(observer_id)
 
-            # --------------------------------------------
-            # Calculate trajectories
-            # --------------------------------------------
+            # Clear previous figure
+            data.pop("orbit_fig", None)
+
+            # ------------------------------------------------
+            # Calculate all trajectories
+            # ------------------------------------------------
 
             try:
 
@@ -688,31 +559,39 @@ def analyze_data(
                         targetnum=targetnum,
                     )
 
-                # Generate figure for the primary target.
-                # Rendering remains separate from calculation.
+                # --------------------------------------------
+                # Generate combined figure
+                # --------------------------------------------
 
-                data["orbit_fig"] = plot_orbit(
-                    data,
-                    targetnum=0,
-                )
+                data["orbit_fig"] = plot_orbit(data)
+
+                # --------------------------------------------
+                # Report results
+                # --------------------------------------------
 
                 print(
                     f"Successfully calculated "
-                    f"{len(data['target'])} "
-                    f"trajectory(s)."
+                    f"{len(data['target'])} trajectory(s)."
+                )
+
+                print(
+                    f"Observer: {data['observer']}"
                 )
 
                 for target in data["target"]:
+
                     print(
-                        f"  - {target['name']}"
+                        f"Target: {target['name']}"
                     )
 
                 print(
                     "\nRun the visualization cell "
-                    "to display the orbit."
+                    "to display the combined orbit plot."
                 )
 
             except Exception as error:
+
+                data.pop("orbit_fig", None)
 
                 print(
                     f"Orbit calculation failed: {error}"
@@ -722,24 +601,33 @@ def analyze_data(
         on_button_clicked
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # UI layout
-    # --------------------------------------------------------
+    # ========================================================
 
     UI = widgets.GridBox(
         children=[
             targetSelect,
             dataStartDate,
+
             observerSelect,
             dataStopDate,
+
             enable_second_target,
             targetSelect2,
+
             calculate_button,
         ],
+
         layout=widgets.Layout(
             width="70%",
+
             grid_template_columns="300px 300px",
-            grid_template_rows="40px 40px 40px 40px",
+
+            grid_template_rows=(
+                "40px 40px 40px 40px"
+            ),
+
             grid_gap="10px 20px",
         ),
     )
