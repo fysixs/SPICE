@@ -9,8 +9,7 @@ from pathlib import Path
 
 from IPython.display import (
     display,
-    Markdown,
-    HTML
+    Markdown
 )
 
 from .config import ui_clr
@@ -566,8 +565,6 @@ def analyze_data(
                 print(
                     f"Orbit calculation failed: {error}"
                 )
-                
-        data["orbit_fig"].show(renderer="colab")
 
     plot_orbit_button.on_click(
         on_button_clicked
