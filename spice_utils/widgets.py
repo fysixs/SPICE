@@ -269,7 +269,8 @@ def analyze_data(
     steps=8000,
 ):
     """
-    Create target/observer selection and orbit plotting widgets.
+    Create widgets for selecting an observer and up to two
+    targets, then calculate their SPICE trajectories.
 
     Parameters
     ----------
@@ -281,6 +282,11 @@ def analyze_data(
 
     steps : int
         Number of trajectory samples.
+
+    Returns
+    -------
+    dict
+        Updated shared notebook state.
     """
 
     # --------------------------------------------------------
@@ -323,6 +329,16 @@ def analyze_data(
             "At least two available objects are required."
         )
 
+    # Lookup table for resolving object names
+    name_lookup = dict(
+        available_objects[
+            ["naif_id", "name"]
+        ].itertuples(
+            index=False,
+            name=None,
+        )
+    )
+
     # --------------------------------------------------------
     # Object selection widgets
     # --------------------------------------------------------
@@ -330,18 +346,20 @@ def analyze_data(
     targetSelect = widgets.Dropdown(
         options=object_list,
         value=object_list[0][1],
-        description="Target:",
+        description="Target 1:",
         layout=widgets.Layout(
             width="auto",
         ),
     )
 
+    observer_options = [
+        item
+        for item in object_list
+        if item[1] != targetSelect.value
+    ]
+
     observerSelect = widgets.Dropdown(
-        options=[
-            item
-            for item in object_list
-            if item[1] != targetSelect.value
-        ],
+        options=observer_options,
         description="Observer:",
         layout=widgets.Layout(
             width="auto",
@@ -349,12 +367,49 @@ def analyze_data(
     )
 
     # --------------------------------------------------------
-    # Keep target and observer mutually exclusive
+    # Optional second target
+    # --------------------------------------------------------
+
+    enable_second_target = widgets.Checkbox(
+        value=False,
+        description="Add second target",
+        indent=False,
+        disabled=len(object_list) < 3,
+    )
+
+    target2_options = [
+        item
+        for item in object_list
+        if item[1] not in (
+            targetSelect.value,
+            observerSelect.value,
+        )
+    ]
+
+    targetSelect2 = widgets.Dropdown(
+        options=target2_options,
+        description="Target 2:",
+        disabled=True,
+        layout=widgets.Layout(
+            width="auto",
+        ),
+    )
+
+    # Hide the second target dropdown initially
+    targetSelect2.layout.display = "none"
+
+    # --------------------------------------------------------
+    # Keep selections mutually exclusive
     # --------------------------------------------------------
 
     updating = False
 
-    def update_observer_options(change):
+    def synchronize_selections(change=None):
+        """
+        Ensure the observer, primary target, and optional
+        second target are distinct.
+        """
+
         nonlocal updating
 
         if updating:
@@ -363,73 +418,109 @@ def analyze_data(
         updating = True
 
         try:
-            current_observer = observerSelect.value
 
-            valid_options = [
+            selected_target = targetSelect.value
+            selected_observer = observerSelect.value
+            selected_target2 = targetSelect2.value
+
+            # Observer cannot equal primary target
+            observer_options = [
                 item
                 for item in object_list
-                if item[1] != targetSelect.value
+                if item[1] != selected_target
             ]
 
-            observerSelect.options = valid_options
+            observerSelect.options = observer_options
 
-            valid_ids = [
+            valid_observers = [
                 item[1]
-                for item in valid_options
+                for item in observer_options
             ]
 
-            if current_observer in valid_ids:
-                observerSelect.value = current_observer
+            if selected_observer in valid_observers:
+                observerSelect.value = selected_observer
             else:
-                observerSelect.value = valid_ids[0]
+                observerSelect.value = valid_observers[0]
 
-        finally:
-            updating = False
-
-    def update_target_options(change):
-        nonlocal updating
-
-        if updating:
-            return
-
-        updating = True
-
-        try:
-            current_target = targetSelect.value
-
-            valid_options = [
+            # Primary target cannot equal observer
+            target_options = [
                 item
                 for item in object_list
                 if item[1] != observerSelect.value
             ]
 
-            targetSelect.options = valid_options
+            targetSelect.options = target_options
 
-            valid_ids = [
+            valid_targets = [
                 item[1]
-                for item in valid_options
+                for item in target_options
             ]
 
-            if current_target in valid_ids:
-                targetSelect.value = current_target
+            if selected_target in valid_targets:
+                targetSelect.value = selected_target
             else:
-                targetSelect.value = valid_ids[0]
+                targetSelect.value = valid_targets[0]
+
+            # Second target cannot equal either selection
+            target2_options = [
+                item
+                for item in object_list
+                if item[1] not in (
+                    targetSelect.value,
+                    observerSelect.value,
+                )
+            ]
+
+            targetSelect2.options = target2_options
+
+            valid_target2_ids = [
+                item[1]
+                for item in target2_options
+            ]
+
+            if selected_target2 in valid_target2_ids:
+                targetSelect2.value = selected_target2
+            elif valid_target2_ids:
+                targetSelect2.value = valid_target2_ids[0]
 
         finally:
             updating = False
 
+    # Observe changes to the primary target and observer
     targetSelect.observe(
-        update_observer_options,
+        synchronize_selections,
         names="value",
     )
 
     observerSelect.observe(
-        update_target_options,
+        synchronize_selections,
         names="value",
     )
 
-    # Apply initial filtering in both directions
-    update_target_options(None)
+    # Apply initial filtering
+    synchronize_selections()
+
+    # --------------------------------------------------------
+    # Toggle second target
+    # --------------------------------------------------------
+
+    def toggle_second_target(change):
+
+        enabled = change["new"]
+
+        targetSelect2.disabled = not enabled
+
+        targetSelect2.layout.display = (
+            "" if enabled else "none"
+        )
+
+        if enabled:
+            synchronize_selections()
+
+    enable_second_target.observe(
+        toggle_second_target,
+        names="value",
+    )
 
     # --------------------------------------------------------
     # Date selection
@@ -452,11 +543,11 @@ def analyze_data(
     )
 
     # --------------------------------------------------------
-    # Plot button
+    # Calculate button
     # --------------------------------------------------------
 
-    plot_orbit_button = widgets.Button(
-        description="🚀 Plot Orbit 🚀",
+    calculate_button = widgets.Button(
+        description="🚀 Calculate Orbit 🚀",
         layout=widgets.Layout(
             width="auto",
         ),
@@ -472,8 +563,10 @@ def analyze_data(
     # --------------------------------------------------------
 
     data["steps"] = steps
+
     data["observer"] = ""
     data["observer_id"] = None
+
     data["target"] = []
 
     data["plotStartDate"] = dataStartDate
@@ -482,8 +575,11 @@ def analyze_data(
     data["targetSelect"] = targetSelect
     data["observerSelect"] = observerSelect
 
+    data["targetSelect2"] = targetSelect2
+    data["enableSecondTarget"] = enable_second_target
+
     # --------------------------------------------------------
-    # Plot callback
+    # Calculate callback
     # --------------------------------------------------------
 
     def on_button_clicked(button):
@@ -492,14 +588,47 @@ def analyze_data(
 
             output.clear_output(wait=True)
 
+            # --------------------------------------------
+            # Read selections
+            # --------------------------------------------
+
             target_id = targetSelect.value
             observer_id = observerSelect.value
 
-            if target_id == observer_id:
+            selected_target_ids = [target_id]
+
+            if enable_second_target.value:
+
+                target2_id = targetSelect2.value
+
+                if target2_id is None:
+                    print(
+                        "No second target is available."
+                    )
+                    return
+
+                selected_target_ids.append(
+                    target2_id
+                )
+
+            # --------------------------------------------
+            # Validate object selections
+            # --------------------------------------------
+
+            selected_ids = (
+                selected_target_ids + [observer_id]
+            )
+
+            if len(set(selected_ids)) != len(selected_ids):
                 print(
-                    "Target and observer must be different."
+                    "Target and observer selections "
+                    "must all be different."
                 )
                 return
+
+            # --------------------------------------------
+            # Validate dates
+            # --------------------------------------------
 
             start_date = dataStartDate.value
             stop_date = dataStopDate.value
@@ -516,7 +645,6 @@ def analyze_data(
                 )
                 return
 
-            # Validate against downloaded date range
             download_start = data["mainStartDate"].value
             download_stop = data["mainStopDate"].value
 
@@ -530,34 +658,58 @@ def analyze_data(
                 )
                 return
 
-            # Resolve display names
-            target_name = available_objects.loc[
-                available_objects["naif_id"] == target_id,
-                "name",
-            ].iloc[0]
+            # --------------------------------------------
+            # Prepare trajectory data
+            # --------------------------------------------
 
-            observer_name = available_objects.loc[
-                available_objects["naif_id"] == observer_id,
-                "name",
-            ].iloc[0]
+            data["target"] = [
+                {
+                    "id": int(target_id),
+                    "name": name_lookup[target_id],
+                }
+                for target_id in selected_target_ids
+            ]
 
-            data["target"] = [{
-                "id": int(target_id),
-                "name": target_name,
-            }]
-
-            data["observer"] = observer_name
+            data["observer"] = name_lookup[observer_id]
             data["observer_id"] = int(observer_id)
+
+            # --------------------------------------------
+            # Calculate trajectories
+            # --------------------------------------------
 
             try:
 
-                get_data(
+                for targetnum in range(
+                    len(data["target"])
+                ):
+
+                    get_data(
+                        data,
+                        targetnum=targetnum,
+                    )
+
+                # Generate figure for the primary target.
+                # Rendering remains separate from calculation.
+
+                data["orbit_fig"] = plot_orbit(
                     data,
                     targetnum=0,
                 )
 
-                data["orbit_fig"] = plot_orbit(
-                    data
+                print(
+                    f"Successfully calculated "
+                    f"{len(data['target'])} "
+                    f"trajectory(s)."
+                )
+
+                for target in data["target"]:
+                    print(
+                        f"  - {target['name']}"
+                    )
+
+                print(
+                    "\nRun the visualization cell "
+                    "to display the orbit."
                 )
 
             except Exception as error:
@@ -566,7 +718,7 @@ def analyze_data(
                     f"Orbit calculation failed: {error}"
                 )
 
-    plot_orbit_button.on_click(
+    calculate_button.on_click(
         on_button_clicked
     )
 
@@ -580,12 +732,14 @@ def analyze_data(
             dataStartDate,
             observerSelect,
             dataStopDate,
-            plot_orbit_button,
+            enable_second_target,
+            targetSelect2,
+            calculate_button,
         ],
         layout=widgets.Layout(
             width="70%",
             grid_template_columns="300px 300px",
-            grid_template_rows="40px 40px 40px",
+            grid_template_rows="40px 40px 40px 40px",
             grid_gap="10px 20px",
         ),
     )
