@@ -10,6 +10,7 @@ from pathlib import Path
 from IPython.display import (
     display,
     Markdown,
+    HTML
 )
 
 from .config import ui_clr
@@ -560,7 +561,12 @@ def analyze_data(
                     data
                 )
 
-                data['orbit_fig'].show(renderer="iframe")
+                html = data["orbit_fig"].to_html(
+                    full_html=True,
+                    include_plotlyjs=True
+                )
+
+                display(HTML(html))
 
             except Exception as error:
 
