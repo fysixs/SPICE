@@ -560,9 +560,7 @@ def analyze_data(
                     data
                 )
 
-                display(
-                    data["orbit_fig"]
-                )
+                data['orbit_fig'].show(renderer="iframe")
 
             except Exception as error:
 
