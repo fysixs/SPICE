@@ -475,42 +475,106 @@ def configure_metakernel(
 
 def prepare_metakernel(mission_dir):
     """
-    Locate and configure a mission meta-kernel.
+    Generate a local SPICE meta-kernel from downloaded NAIF kernels.
+
+    Recursively discovers kernel files without assuming a
+    specific archive directory structure.
+
+    Parameters
+    ----------
+    mission_dir : str or Path
+        Directory containing the downloaded mission data.
+
+    Returns
+    -------
+    Path
+        Path to the generated meta-kernel.
     """
 
-    mission_dir = Path(
-        mission_dir
-    ).resolve()
+    from pathlib import Path
 
-    kernel_dirs = list(
-        mission_dir.rglob("spice_kernels")
-    )
+    mission_dir = Path(mission_dir).resolve()
 
-    if len(kernel_dirs) != 1:
-        raise RuntimeError(
-            "Expected one spice_kernels directory; "
-            f"found {len(kernel_dirs)}"
-        )
+    # --------------------------------------------------------
+    # Discover SPICE kernel files
+    # --------------------------------------------------------
 
-    kernels_dir = kernel_dirs[0]
+    kernel_extensions = {
+        ".bsp",   # SPK
+        ".bc",    # CK
+        ".bpc",   # Binary PCK
+        ".tls",   # Leap seconds
+        ".tpc",   # Text PCK
+        ".tf",    # Frame kernels
+        ".ti",    # Instrument kernels
+        ".tsc",   # Spacecraft clock
+        ".bds",   # Digital shape kernels
+    }
 
-    metakernels = [
+    kernel_files = sorted(
         path
-        for path in mission_dir.rglob("*.tm")
-        if not path.stem.endswith("_local")
-    ]
+        for path in mission_dir.rglob("*")
+        if (
+            path.is_file()
+            and path.suffix.lower() in kernel_extensions
+        )
+    )
 
-    if len(metakernels) != 1:
+    if not kernel_files:
         raise RuntimeError(
-            "Expected one original meta-kernel; "
-            f"found {len(metakernels)}"
+            f"No SPICE kernels found in {mission_dir}"
         )
 
-    return configure_metakernel(
-        metakernel_path=metakernels[0],
-        kernels_dir=kernels_dir,
-        validate=True,
+    print(
+        f"Found {len(kernel_files)} SPICE kernels."
     )
+
+    # --------------------------------------------------------
+    # Construct meta-kernel
+    # --------------------------------------------------------
+
+    metakernel_path = mission_dir / "local_meta.tm"
+
+    kernel_entries = []
+
+    for kernel in kernel_files:
+
+        # Absolute paths avoid working-directory issues
+        kernel_path = kernel.resolve().as_posix()
+
+        # Escape single quotes for SPICE text syntax
+        kernel_path = kernel_path.replace(
+            "'",
+            "''",
+        )
+
+        kernel_entries.append(
+            f"    '{kernel_path}'"
+        )
+
+    kernel_list = ",\n".join(
+        kernel_entries
+    )
+
+    metakernel_content = (
+        "KPL/MK\n\n"
+        "\\begindata\n\n"
+        "KERNELS_TO_LOAD = (\n"
+        f"{kernel_list}\n"
+        ")\n\n"
+        "\\begintext\n"
+    )
+
+    metakernel_path.write_text(
+        metakernel_content,
+        encoding="utf-8",
+    )
+
+    print(
+        f"Meta-kernel created: {metakernel_path}"
+    )
+
+    return metakernel_path
 
 
 def load_naif_kernels(
