@@ -168,6 +168,7 @@ def plot_polar_orbit(
             line_width=2,
             line_alpha=0.9,
             legend_label=name,
+            name=name,
         )
 
         p.scatter(
@@ -179,6 +180,7 @@ def plot_polar_orbit(
             line_color="red",
             fill_color=colors[i],
             fill_alpha=0.8,
+            name=name,
         )
 
     p.xaxis.axis_label = "x (km)"
