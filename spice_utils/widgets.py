@@ -221,9 +221,9 @@ def import_data(spiceDf):
 
                 display(
                     Markdown(
+                        "---------------------------"
                         "Mission kernels are ready. "
-                        "Proceed to target and observer "
-                        "selection."
+                        "Proceed to target and observer selection."
                     )
                 )
 
@@ -481,9 +481,11 @@ def analyze_data(
 
             if len(set(selected_ids)) != len(selected_ids):
 
-                print(
-                    "Target(s) and observer must "
-                    "all be different objects."
+                display(
+                    Markdown(
+                        "Target(s) and observer must "
+                        "all be different objects."
+                    )
                 )
 
                 return
@@ -497,16 +499,20 @@ def analyze_data(
 
             if start_date is None or stop_date is None:
 
-                print(
-                    "Please select both dates."
+                display(
+                    Markdown(
+                        "Please select both dates."
+                    )
                 )
 
                 return
 
             if start_date >= stop_date:
 
-                print(
-                    "Start date must be before stop date."
+                display(
+                    Markdown(
+                        "Start date must be before stop date."
+                    )
                 )
 
                 return
@@ -519,9 +525,11 @@ def analyze_data(
                 or stop_date > download_stop
             ):
 
-                print(
-                    "Selected dates must be within "
-                    "the downloaded mission range."
+                display(
+                    Markdown(
+                        "Selected dates must be within "
+                        "the downloaded mission range."
+                    )
                 )
 
                 return
@@ -569,32 +577,40 @@ def analyze_data(
                 # Report results
                 # --------------------------------------------
 
-                print(
-                    f"Successfully calculated "
-                    f"{len(data['target'])} trajectory(s)."
+                display(
+                    Markdown(
+                        f"Successfully calculated {len(data['target'])} trajectory(s)."
+                    )
                 )
 
-                print(
-                    f"Observer: {data['observer']}"
+                display(
+                    Markdown(
+                        f"Observer: {data['observer']}"
+                    )
                 )
 
                 for target in data["target"]:
 
-                    print(
-                        f"Target: {target['name']}"
+                    display(
+                        Markdown(
+                            f"Target: {target['name']}"
+                        )
                     )
 
-                print(
-                    "\nRun the visualization cell "
-                    "to display the combined orbit plot."
+                display(
+                    Markdown(
+                        "\nRun the visualization cell to display the combined orbit plot."
+                    )
                 )
 
             except Exception as error:
 
                 data.pop("orbit_fig", None)
 
-                print(
-                    f"Orbit calculation failed: {error}"
+                display(
+                    Markdown(
+                        f"Orbit calculation failed: {error}"
+                    )
                 )
 
     calculate_button.on_click(

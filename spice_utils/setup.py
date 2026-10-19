@@ -21,8 +21,9 @@ def initialize_environment():
 
     display(
         Markdown(
-            "**Environment Setup Complete!** "
-            "Please run the next cell to select a mission."
+            "<font size=3> **Environment Setup Complete!** "
+            
+            "<font size=3> Please run the next cell to select a mission."
         )
     )
 
