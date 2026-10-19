@@ -26,7 +26,7 @@ from bokeh.models import (
 
 from bokeh.palettes import Category10, Category20
 
-from kinematics import calc_kinematics
+from spice_utils.kinematics import calc_kinematics
 
 
 # --------------------------------------------------
