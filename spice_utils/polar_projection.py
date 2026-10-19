@@ -130,6 +130,7 @@ def plot_polar_orbit(
     target_names,
     colors,
     rmax,
+    observer_name,
 ):
     """
     Create interactive projected-orbit plot.
@@ -155,6 +156,7 @@ def plot_polar_orbit(
         line_color="#3288bd",
         fill_color="antiquewhite",
         line_width=2,
+        name=observer_name,
     )
 
     # Target trajectories
@@ -352,6 +354,7 @@ def polar_projection(data):
         target_names=names,
         colors=colors,
         rmax=rmax,
+        observer_name=data["observer"],
     )
 
     # ----------------------------------------------
