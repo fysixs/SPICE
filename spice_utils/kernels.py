@@ -3,7 +3,6 @@ SPICE kernel download, configuration, and loading utilities.
 """
 
 import hashlib
-import json
 import re
 import shutil
 import zipfile
@@ -363,204 +362,352 @@ def download_naif_data(
     return mission_dir
 
 
-def configure_metakernel(
-    metakernel_path,
-    kernels_dir,
-    output_path=None,
-    validate=True,
-):
+# ============================================================
+# Meta-kernel helpers
+# ============================================================
+
+def _parse_metakernel_entries(metakernel_path):
     """
-    Configure a SPICE meta-kernel for local kernel paths.
+    Extract PATH_VALUES, PATH_SYMBOLS, and KERNELS_TO_LOAD
+    from a NAIF meta-kernel.
+
+    Returns
+    -------
+    list[Path]
+        Absolute paths to referenced kernel files.
     """
 
-    metakernel_path = Path(
-        metakernel_path
-    ).resolve()
+    metakernel_path = Path(metakernel_path).resolve()
 
-    kernels_dir = Path(
-        kernels_dir
-    ).resolve()
-
-    if not metakernel_path.is_file():
-        raise FileNotFoundError(
-            metakernel_path
-        )
-
-    if not kernels_dir.is_dir():
-        raise NotADirectoryError(
-            kernels_dir
-        )
-
-    if output_path is None:
-        output_path = metakernel_path.with_name(
-            f"{metakernel_path.stem}_local.tm"
-        )
-    else:
-        output_path = Path(
-            output_path
-        ).resolve()
-
-    text = metakernel_path.read_text(
-        encoding="utf-8"
+    content = metakernel_path.read_text(
+        encoding="utf-8",
+        errors="replace",
     )
 
-    pattern = re.compile(
-        r"(PATH_VALUES\s*=\s*\()"
-        r"(.*?)"
-        r"(\))",
-        re.DOTALL,
+    # Only parse data sections, not explanatory comments.
+    data_sections = re.findall(
+        r"\\begindata(.*?)(?=\\begintext|\\begindata|\Z)",
+        content,
+        flags=re.DOTALL | re.IGNORECASE,
     )
 
-    match = pattern.search(text)
+    data_content = "\n".join(data_sections)
 
-    if not match:
-        raise ValueError(
-            "PATH_VALUES not found in meta-kernel."
+    def get_values(variable):
+        """
+        Extract quoted string values from a meta-kernel
+        variable assignment.
+        """
+
+        pattern = (
+            rf"\b{re.escape(variable)}\s*"
+            rf"(?:=|\+=)\s*\((.*?)\)"
         )
 
-    kernel_path = kernels_dir.as_posix()
-
-    replacement = (
-        match.group(1)
-        + f"\n    '{kernel_path}'\n"
-        + match.group(3)
-    )
-
-    modified_text = (
-        text[:match.start()]
-        + replacement
-        + text[match.end():]
-    )
-
-    if validate:
-
-        kernel_pattern = re.compile(
-            r"'\$KERNELS/([^']+)'"
+        matches = re.findall(
+            pattern,
+            data_content,
+            flags=re.DOTALL | re.IGNORECASE,
         )
 
-        kernel_files = kernel_pattern.findall(
-            modified_text
-        )
+        values = []
 
-        missing = [
-            kernel
-            for kernel in kernel_files
-            if not (
-                kernels_dir / kernel
-            ).is_file()
-        ]
-
-        if missing:
-            raise FileNotFoundError(
-                "Missing kernel files:\n"
-                + "\n".join(missing)
+        for match in matches:
+            values.extend(
+                re.findall(
+                    r"'((?:[^']|'')*)'",
+                    match,
+                )
             )
 
-        print(
-            f"Validated {len(kernel_files)} "
-            "kernel references."
+        return [
+            value.replace("''", "'")
+            for value in values
+        ]
+
+    path_symbols = get_values("PATH_SYMBOLS")
+    path_values = get_values("PATH_VALUES")
+    kernel_entries = get_values("KERNELS_TO_LOAD")
+
+    if len(path_symbols) != len(path_values):
+        raise ValueError(
+            f"PATH_SYMBOLS and PATH_VALUES mismatch "
+            f"in {metakernel_path.name}"
         )
 
-    output_path.write_text(
-        modified_text,
-        encoding="utf-8",
+    # Resolve NAIF path symbols.
+    symbol_map = dict(
+        zip(path_symbols, path_values)
     )
 
-    print(
-        f"Meta-kernel saved: {output_path}"
-    )
+    resolved_kernels = []
 
-    return output_path
+    for entry in kernel_entries:
 
+        resolved = entry
+
+        for symbol, value in symbol_map.items():
+            resolved = resolved.replace(
+                f"${symbol}",
+                value,
+            )
+
+        kernel_path = Path(resolved)
+
+        if not kernel_path.is_absolute():
+
+            candidate = (
+                metakernel_path.parent / kernel_path
+            ).resolve()
+
+            if candidate.is_file():
+
+                kernel_path = candidate
+
+            else:
+
+                # NAIF subset archives sometimes place the
+                # actual data directory inside a named folder
+                # such as cosp_1000/data/.
+
+                matching_files = list(
+                    metakernel_path.parent.rglob(
+                        kernel_path.name
+                    )
+                )
+
+                # Match the complete trailing path, not
+                # just the filename.
+                matching_files = [
+                    path
+                    for path in matching_files
+                    if path.as_posix().endswith(
+                        kernel_path.as_posix().lstrip("./")
+                    )
+                ]
+
+                if len(matching_files) == 1:
+
+                    kernel_path = matching_files[0]
+
+                elif len(matching_files) == 0:
+
+                    raise FileNotFoundError(
+                        f"Kernel referenced by "
+                        f"{metakernel_path.name} "
+                        f"was not found: {resolved}"
+                    )
+
+                else:
+
+                    raise RuntimeError(
+                        f"Ambiguous kernel reference "
+                        f"in {metakernel_path.name}: "
+                        f"{resolved}"
+                    )
+
+        resolved_kernels.append(
+            kernel_path.resolve()
+        )
+
+    return resolved_kernels
+
+
+def _deduplicate_kernels(kernel_paths):
+    """
+    Remove duplicate kernel references while preserving
+    their final occurrence and loading order.
+    """
+
+    seen = set()
+    result = []
+
+    for path in reversed(kernel_paths):
+
+        normalized = str(Path(path).resolve())
+
+        if normalized not in seen:
+            seen.add(normalized)
+            result.append(Path(normalized))
+
+    return list(reversed(result))
+
+
+# ============================================================
+# Prepare local meta-kernel
+# ============================================================
 
 def prepare_metakernel(mission_dir):
     """
-    Generate a local SPICE meta-kernel from downloaded NAIF kernels.
+    Generate a local meta-kernel by combining the original
+    NAIF meta-kernels.
 
-    Recursively discovers kernel files without assuming a
-    specific archive directory structure.
+    Preserves kernel loading order and uses SPICE path
+    symbols to avoid long absolute kernel filenames.
 
     Parameters
     ----------
     mission_dir : str or Path
-        Directory containing the downloaded mission data.
+        Directory containing extracted NAIF mission data.
 
     Returns
     -------
     Path
-        Path to the generated meta-kernel.
+        Path to the generated local meta-kernel.
     """
-
-    from pathlib import Path
 
     mission_dir = Path(mission_dir).resolve()
 
+    print("Searching for original NAIF meta-kernels...")
+
     # --------------------------------------------------------
-    # Discover SPICE kernel files
+    # Discover original meta-kernels
     # --------------------------------------------------------
 
-    kernel_extensions = {
-        ".bsp",   # SPK
-        ".bc",    # CK
-        ".bpc",   # Binary PCK
-        ".tls",   # Leap seconds
-        ".tpc",   # Text PCK
-        ".tf",    # Frame kernels
-        ".ti",    # Instrument kernels
-        ".tsc",   # Spacecraft clock
-        ".bds",   # Digital shape kernels
-    }
-
-    kernel_files = sorted(
+    metakernels = sorted(
         path
-        for path in mission_dir.rglob("*")
-        if (
-            path.is_file()
-            and path.suffix.lower() in kernel_extensions
-        )
+        for path in mission_dir.rglob("*.tm")
+        if path.name != "local_meta.tm"
     )
 
-    if not kernel_files:
+    if not metakernels:
         raise RuntimeError(
-            f"No SPICE kernels found in {mission_dir}"
+            "No original NAIF meta-kernels found in "
+            f"{mission_dir}"
         )
 
     print(
-        f"Found {len(kernel_files)} SPICE kernels."
+        f"Found {len(metakernels)} original meta-kernel(s)."
+    )
+
+    for metakernel in metakernels:
+        print(f"  - {metakernel.name}")
+
+    # --------------------------------------------------------
+    # Parse original kernel references
+    # --------------------------------------------------------
+
+    all_kernels = []
+
+    for metakernel in metakernels:
+
+        kernel_paths = _parse_metakernel_entries(
+            metakernel
+        )
+
+        print(
+            f"{metakernel.name}: "
+            f"{len(kernel_paths)} kernel references"
+        )
+
+        all_kernels.extend(kernel_paths)
+
+    # --------------------------------------------------------
+    # Remove duplicate references
+    # --------------------------------------------------------
+
+    kernel_files = _deduplicate_kernels(
+        all_kernels
+    )
+
+    print(
+        f"Found {len(kernel_files)} unique kernel references."
     )
 
     # --------------------------------------------------------
-    # Construct meta-kernel
+    # Validate referenced files
     # --------------------------------------------------------
 
-    metakernel_path = mission_dir / "local_meta.tm"
+    missing = [
+        path
+        for path in kernel_files
+        if not path.is_file()
+    ]
+
+    if missing:
+
+        print("\nMissing kernel files:")
+
+        for path in missing[:20]:
+            print(f"  - {path}")
+
+        raise FileNotFoundError(
+            f"{len(missing)} referenced kernels "
+            "could not be found."
+        )
+
+    # --------------------------------------------------------
+    # Build path-symbol mapping
+    # --------------------------------------------------------
+
+    # Use the mission directory as the common root.
+    #
+    # Individual references are converted into paths
+    # relative to this directory.
+
+    root_path = mission_dir.as_posix()
 
     kernel_entries = []
 
     for kernel in kernel_files:
 
-        # Absolute paths avoid working-directory issues
-        kernel_path = kernel.resolve().as_posix()
-
-        # Escape single quotes for SPICE text syntax
-        kernel_path = kernel_path.replace(
-            "'",
-            "''",
-        )
+        relative_path = kernel.relative_to(
+            mission_dir
+        ).as_posix()
 
         kernel_entries.append(
-            f"    '{kernel_path}'"
+            f"$KERNELS/{relative_path}"
         )
 
-    kernel_list = ",\n".join(
-        kernel_entries
+    # --------------------------------------------------------
+    # Validate SPICE string lengths
+    # --------------------------------------------------------
+
+    # SPICE text kernels impose a limit on individual
+    # string values. Keep each generated path within
+    # the supported length.
+
+    for entry in kernel_entries:
+
+        if len(entry) > 80:
+            raise ValueError(
+                "Kernel reference exceeds 80 characters: "
+                f"{entry}"
+            )
+
+    if len(root_path) > 80:
+        raise ValueError(
+            "Mission directory path exceeds "
+            "the SPICE string length limit."
+        )
+
+    # --------------------------------------------------------
+    # Generate local meta-kernel
+    # --------------------------------------------------------
+
+    metakernel_path = (
+        mission_dir / "local_meta.tm"
+    )
+
+    def quote_spice(value):
+        return "'" + value.replace("'", "''") + "'"
+
+    kernel_lines = "\n".join(
+        f"    {quote_spice(entry)}"
+        for entry in kernel_entries
     )
 
     metakernel_content = (
         "KPL/MK\n\n"
         "\\begindata\n\n"
+        "PATH_VALUES = (\n"
+        f"    {quote_spice(root_path)}\n"
+        ")\n\n"
+        "PATH_SYMBOLS = (\n"
+        "    'KERNELS'\n"
+        ")\n\n"
         "KERNELS_TO_LOAD = (\n"
-        f"{kernel_list}\n"
+        f"{kernel_lines}\n"
         ")\n\n"
         "\\begintext\n"
     )
@@ -571,7 +718,11 @@ def prepare_metakernel(mission_dir):
     )
 
     print(
-        f"Meta-kernel created: {metakernel_path}"
+        f"Local meta-kernel created: {metakernel_path}"
+    )
+
+    print(
+        f"Total kernels configured: {len(kernel_files)}"
     )
 
     return metakernel_path
